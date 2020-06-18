@@ -1,0 +1,171 @@
+#+TITLE: How to Configure Shadow-Cljs
+
+A "official" (but maybe unmaintained) basic configuration can be found [[https://github.com/shadow-cljs/quickstart-browser][here]].
+
+Shadow-Cljs uses ~shadow-cljs.edn~ as its configuration file.
+
+The main shadow-cljs commands are ~compile~, ~watch~, ~release~, ~cljs-repl~, and ~node-repl~.
+
+Shadow-Cljs uses the JVM classpath to search for files to run. Each entry in the class path is either a directory path (goes in ~:source-paths~) or a ~.jar~ file (goes in ~:dependencies~). When you have a ~(ns demo/app.cljs)~ in your code, Shadow-Cljs will search the classpath to find its files.
+
+* shadow-cljs.edn
+The whole config file is a map.
+#+begin_src clojure
+  {:source-paths
+   ["src"]
+
+   :dependencies
+   [[reagent "0.9.1"]]
+
+   :dev-http
+   {8080 "public"}
+
+   :builds
+   {:app {:target :browser
+        :output-dir "public/js"
+        :asset-path "/js"
+        :modules {:main {:entries [core]}}}}
+
+#+end_src
+These top-level keys are important:
+** source-paths
+An array of relative directory paths. These will be searched in order to find cljs code files.
+#+begin_src clojure
+  ;;; This will search "src/main" then "src/test".
+  {:source-paths ["src/main" "src/test"]}
+#+end_src
+** dependencies
+An array of pairs for all the external dependencies of the app. These will be automatically installed when your app first runs, and their paths will be added to the classpath.
+
+You shouldn't quote the name of the dependency.
+#+begin_src clojure
+{:dependencies [[cider/cider-nrepl "0.21.0"] [reagent "0.8.1"]]}
+#+end_src
+** dev-http
+If included, shadow-cljs will serve all static files on the specified port automatically. It's value is a map with a port number as key, and a "config" as a value. The config can be a simple string, like "public", or a vector to server from multiple places, or a map for advanced ~:dev-http~ configuration.
+
+~:dev-http {8000 "public"}~ will serve all files in the ~public~ folder on ~http://localhost:8000~. It defaults to serving ~/public/index.html~, which you need to make yourself.
+** builds
+A map of build targets and specific settings for each one. These can be passed as arguments to the command line tool. ~shadow-cljs compile app~ will compile the build target named "app".
+
+~:builds~ should have a value that is also a map. The keys of this inner map will be the names of each build target, and the values will be build-target-specific settings.
+
+You'll probably have different ~:build~ for development and release, for example for tuning the Google Closure Compiler. 
+*** Build-specific settings
+Something to keep in mind when reading below is that generally your web-server or application will serve a single folder, often the folder ~public~. Several of the settings below are setting paths that are relative to this served folder, so it's important to be aware of the context for which they are needed.
+
+~:output-dir~ is a relative file path for the directory to use for the compiler output. This is generally under the ~public~ folder (the folder being served), and should include the served folder, as in "public/js". Each build target must have its own separate ~:output-dir~ directory.
+
+~:asset-path~ is a relative file path under the served folder (e.g. ~public~. Where ~output-dir~ specifices "where to put the compiled files", ~:asset-path~ is actually affecting where generated javascript will search for other ~.js~ modules it needs. In your ~index.html~ a line like this ~<script src="/js/main.js"></script>~ will load your generated javascript. Any additional ~require~ or ~import~ calls inside that javascript while be prefixed with your ~:asset-path~, here ~/js~.
+
+~:modules~ allows you to split your code into separate javascript bundles to help minimize loading time. Don't worry about this at first, just use one module. The ~:modules~ value should be a map with "module IDs" as keys, with the value being another map with a whole 'nother set of config options for its keys. The module ID becomes the name of the output javascript file, for example a module ID of ~:main~ becomes ~public/js/main.js~. You will eventually reference this relative to ~public~ in your ~index.html~ with a line like this ~<script src="/js/main.js"></script>~.
+
+For a simple config, you only need ~:modules~ to have one key, either ~:entries~ or ~:init-fn~. ~:entries~ will take an array of namespaces that serve as the root node of the dependency graphy. ~:init-fn~ should be the full name space of a specific function to kick off the app, like ~demo.app/init~. Note this is different from the classpath representation ~demo/app.cljs~, it's very confusing.
+* Server Mode
+Each shadow-cljs command takes a pretty long time, because a JVM has to be started on each call. You can run Shadow-Cljs in *Server Mode* to speed this up. ~compile~, ~watch~, etc, will automatically look for a Shadow-Cljs server running in the background to attach to, and will slowly start a new one only if they can't find an existing one.
+
+~shadow-cljs server~ will run a server process in the open terminal. You'll have to leave that terminal open to keep running. While running, the shadow-cljs commands can attach to the server and execute more quickly.
+
+~shadow-cljs start~ can be used if you don't want to have a dedicated terminal open for server mode. It'll start a server in the background, which you can then toggle with ~shadow-cljs stop~ and ~shadow-cljs restart~.
+
+You should pay attention to whether you're in server mode while using CIDER in Emacs. The "jack-in" function might be different.
+
+Server mode will also reload changes in your config automatically, no need to restart. You do, however, need to restart if you add a new dependency.
+* shadow-cljs watch
+This will compile your code, and watch your source files for changes, and re-compile when a change is made.
+* shadow-cljs release 
+This command will remove all development code and run the code through the Closure Compiler to produce a minified ~main.js~.
+
+You should stop any running ~watch~ process first, because this will override the ~main.js~ used by ~watch~.
+
+After running ~release~, you'd usually copy the resulting ~public~ directory into the "production" web server.
+* index.html
+Your ~index.html~ is loaded automatically, and should "kick off" your generated javascript. In the code below, ~/js/main.js~ is loaded into the namespace, making ~starter~ available. ~starter.browser.init()~ is called to start the application.
+
+Note that ~main.js~ is created as a result of ~shadow-cljs.edn~ ~:builds :app :modules~. For ~main.js~ to be created, ~:main~ should be a key in the ~:modules~ map.
+
+You should make your ~index.html~ manually, and it should go in ~/public/index.html~.
+
+It's good to note that ~index.html~ won't hot reload if you are manually making changes to it. You need to refresh the browser.
+
+Shadow-Cljs won't start an HTTP server to serve these files by default. You need to add a ~:dev-http~ keyword to ~shadow-cljs.edn~.
+#+begin_src html
+  <!doctype html>
+  <html>
+  <head><title>Browser Starter</title></head>
+  <body>
+  <h1>shadow-cljs - Browser</h1>
+  <div id="app"></div>
+
+  <script src="/js/main.js"></script>
+  <script>starter.browser.init();</script>
+  </body>
+  </html>
+#+end_src
+
+The above ~index.html~ assumes the file ~/src/starter/browser.cljs~ has content like this.  The ~^:export~ metadata exposes the function to the global scope, and is required so that the function is visible in ~index.html~.
+#+begin_src clojure
+ (ns starter.browser)
+
+;; start is called by init and after code reloading finishes
+(defn ^:dev/after-load start []
+  (js/console.log "start"))
+
+(defn ^:export init []
+  ;; init is called ONCE when the page loads
+  ;; this is called in the index.html and must be exported
+  ;; so it is available even in :advanced release builds
+  (js/console.log "init")
+  (start))
+
+;; this is called before any code is reloaded
+(defn ^:dev/before-load stop []
+  (js/console.log "stop"))
+#+end_src
+
+* HTTP Servers
+By default, shadow-cljs will serve just one HTTP server for its development UI, Hot Reloading, and REPL integration. 9630 is the default, and it increments by one if that port is in use.
+
+~:dev-http~ can be added to ~shadow-cljs.edn~ to start an additional serve to serve static files, like ~index.html~.
+
+* ^:export
+The ~^~ symbol is a reader macro for Clojure metadata. The ~:export~ symbol can be placed on any function to place it into the global Javascript scope.
+
+This is necessary somewhere in your ~index.html~, so that a cljs function can be called in a ~<script/>~ tag to kick off your application.
+
+* public folder
+This is the "final output" folder. It's named ~public~ by convention, but it can be whatever is named in ~shadow-cljs.edn~ in the ~:builds~ and ~:dev-http~ areas.
+
+You'll manage most of this folder by hand, and you can decide its structure and contents. The only thing shadow-cljs does automatically is load ~index.html~ in the root, which you'll want to make right away and add a ~<script/>~ tag that starts your application.
+
+You might have an ~assets~ folder, a ~css~ folder, an ~images~ folder, anything you want to manage yourself and ship with your app.
+
+You do need to tell shadow-cljs the name of one folder in ~public~ where it will put all the generated javascript that it makes. This is usually ~public/js~, and is specified in ~shadow-cljs.edn~ in the ~:builds :app :output-dir~. Remember that ~:asset-path~ must match ~:output-dir~ so the javascript files know how to load each other. In this example, ~:asset-path~ should be ~/js~.
+
+* The Websocket connection was closed!
+This is a little red flag that will show up over your rendered web page at localhost:8080 if something goes wrong. When I first started, I was confused why it was there over my seemingly innocent ~index.html~. Then I realized I was calling a javascript function in the script tag that doesn't exist, and ~localhost:8080~ was trying to tell me that something's wrong. At the time, I didn't have a REPL open yet, so I couldn't see the error.
+
+You know what, the above paragraph might not have been the issue. I haven't figured it out yet.
+
+* CIDER
+CIDER requires an additional dependency. You should add ~[cider/cider-nrepl "0.21.1"]~ (or the latest version) to your ~:dependencies~. You should probably put it in your ~~/.shadow-cljs/config.edn~. It'll work without this, but you'll be missing useful things like errors.
+
+Your ClojureScript repl (probably provided by CIDER) is not the browser console. ~(js/console.log)~ will not show up there. ~(println)~ will. It seems like you can largely replace the browser console with this.
+
+~cider-connect-cljs~ should be called if you are using ~shadow-cljs server~ so that CIDER can "connect" to the nREPL that shadow-cljs creates. In Emacs, you should call ~cider-connect-cljs~ from a buffer that's visiting somewhere inside your project folder, or else it won't auto-complete the "port" parameter for you.
+
+When you initially connect with CIDER, you'll be prompted to input a "REPL" type, and you should select ~shadow~ for it to work properly with shadow-cljs. You'll also need to select your build target, and if you're running ~cider-connect-cljs~ you'll need to specify the server you're connecting to.
+
+It's important to remember that CIDER is an interface in your app, not your app itself. Refreshing/re-starting CIDER will not restart the app, or refresh any variables in memory.
+* The REPL
+There's a lot going on here, and it's a little confusing when you're coming from the old javascript way of doing things. Before Clojure, you still had hot-reloading when you saved a file. But it felt like it was "running" all your code again on every change. If you removed a function that was needed somewhere, it would break the app on a hot reload. Refreshing the browser page was like doing a "hard reset" of the app and would start it from the beginning.
+* .shadow-cljs/config.edn
+This is a "user config" file that can be placed in your home folder to apply to all ~shadow-cljs~ processings running on your machine.
+
+It accepts a limited set of config options, and exists mainly to have a "global" dependency of tool-specific libraries. Most notable is ~cider/cider-nrepl~, which you'll need for Emacs. You can put this in ~/.shadow-cljs/config.edn~ and leave it out of your project-specific ~shadow-cljs.edn~ configuration.
+
+The options that it accepts are:
+-~:dependencies~
+-~:deps-aliases~
+-~:nrepl~
+-~:open-file-commmand~
